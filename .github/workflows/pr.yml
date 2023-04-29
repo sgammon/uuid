@@ -4,6 +4,20 @@ on:
   pull_request:
     branches:
       - master
+      - beta
+
+env:
+  CI: "true"
+  GRADLE_OPTS: -Dorg.gradle.jvmargs="-XX:+UseParallelGC -Xmx3g -XX:MetaspaceSize=512M -XX:MaxMetaspaceSize=512M"
+  GRADLE_CACHE_LOCAL: true
+  GRADLE_CACHE_REMOTE: true
+  GRADLE_CACHE_PUSH: true
+  GRADLE_CACHE_USERNAME: apikey
+  GRADLE_CACHE_PASSWORD: ${{ secrets.BUILDLESS_APIKEY }}
+  CACHE_ENDPOINT: ${{ vars.CACHE_ENDPOINT_GRADLE }}
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  TEST_EXCEPTIONS: true
 
 jobs:
   build:
@@ -16,13 +30,12 @@ jobs:
         uses: actions/checkout@v2
       - name: Validate Gradle Wrapper
         uses: gradle/wrapper-validation-action@v1
-      - name: Cache gradle
-        uses: actions/cache@v2
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v3
         with:
-          path: ~/.gradle/caches
-          key: ${{ runner.os }}-gradle-${{ hashFiles('*.gradle.kts') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
       - name: Cache konan
         uses: actions/cache@v2
         with:
@@ -30,18 +43,24 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('*.gradle.kts') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+      - name: Cache Gradle packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
+          restore-keys: ${{ runner.os }}-gradle
+      - name: "Build and Test"
+        uses: gradle/gradle-build-action@v2
+        id: gradlebuild
+        with:
+          cache-read-only: false
+          arguments: |
+            preMerge
+            --scan
+            --no-daemon
+            --warning-mode=none
+            --dependency-verification=lenient
+            -Pci=true
 
-      - name: List Tasks
-        run: ./gradlew tasks --no-daemon --stacktrace
-
-       # ktlint
-
-      - name: ktlint
-        if: matrix.os == 'ubuntu-latest'
-        run: ./gradlew ktlint --no-daemon --stacktrace
-
-      - name: Build
-        run: ./gradlew build --no-daemon --stacktrace
-
-env:
-  GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx3g"
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
